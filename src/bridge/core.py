@@ -34,7 +34,10 @@ class Bridge:
         # Whitelist (None = allow all, empty set after filtering = allow all)
         self.allowed_users: set[str] | None = None
         if settings.allowed_users:
-            users = {u.strip() for u in settings.allowed_users.split(",") if u.strip()}
+            users = {
+                u.strip() for u in settings.allowed_users.split(",")
+                if u.strip() and not u.strip().startswith("#")
+            }
             if users:
                 self.allowed_users = users
 
