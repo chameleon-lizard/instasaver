@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -5,6 +6,7 @@ from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import Message, FSInputFile, InputMediaPhoto, InputMediaVideo
 from aiogram.filters import Command
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramNetworkError
 
 from ..config import Settings
 from ..storage.database import Database, MessageMapping
@@ -30,14 +32,52 @@ class TelegramBridge:
         sender: str,
         content: FetchedContent,
         ig_thread_id: str,
-        ig_item_id: str
+        ig_item_id: str,
+        max_retries: int = 10,
+        base_delay: float = 5.0
     ) -> int | None:
-        """Send fetched content to Telegram, return message_id"""
+        """Send fetched content to Telegram, return message_id.
+
+        Retries up to max_retries times with increasing delay on network errors.
+        Falls back to sending just the URL if all retries fail.
+        """
 
         header = f"<b>@{sender}</b>"
         if content.source_url:
             header += f"\n<a href='{content.source_url}'>Источник</a>"
 
+        for attempt in range(max_retries):
+            try:
+                sent_message = await self._send_content_once(content, header)
+
+                # Save mapping on success
+                if sent_message:
+                    mapping = MessageMapping(
+                        tg_message_id=sent_message.message_id,
+                        tg_chat_id=self.owner_id,
+                        ig_thread_id=ig_thread_id,
+                        ig_item_id=ig_item_id,
+                        ig_sender=sender
+                    )
+                    self.db.save_mapping(mapping)
+                    return sent_message.message_id
+
+                return None
+
+            except TelegramNetworkError as e:
+                delay = base_delay * (attempt + 1)
+                logger.warning(
+                    "Telegram network error (attempt %d/%d): %s. Retrying in %.1fs...",
+                    attempt + 1, max_retries, e, delay
+                )
+                await asyncio.sleep(delay)
+
+        # All retries failed - send fallback with just the URL
+        logger.error("All %d retries failed, sending fallback link", max_retries)
+        return await self._send_fallback(sender, content, ig_thread_id, ig_item_id)
+
+    async def _send_content_once(self, content: FetchedContent, header: str):
+        """Attempt to send content once, may raise TelegramNetworkError."""
         sent_message = None
 
         # Multiple media -> media group
@@ -91,8 +131,27 @@ class TelegramBridge:
                 self.owner_id, text, parse_mode=ParseMode.HTML
             )
 
-        # Save mapping
-        if sent_message:
+        return sent_message
+
+    async def _send_fallback(
+        self,
+        sender: str,
+        content: FetchedContent,
+        ig_thread_id: str,
+        ig_item_id: str
+    ) -> int | None:
+        """Send fallback message with just the URL when media upload fails."""
+        if not content.source_url:
+            logger.warning("No source_url for fallback, cannot send link")
+            return None
+
+        text = f"<b>@{sender}</b>\n\nНе смог загрузить медиа, вот ссылка:\n{content.source_url}"
+
+        try:
+            sent_message = await self.bot.send_message(
+                self.owner_id, text, parse_mode=ParseMode.HTML
+            )
+
             mapping = MessageMapping(
                 tg_message_id=sent_message.message_id,
                 tg_chat_id=self.owner_id,
@@ -103,7 +162,9 @@ class TelegramBridge:
             self.db.save_mapping(mapping)
             return sent_message.message_id
 
-        return None
+        except TelegramNetworkError as e:
+            logger.error("Even fallback message failed: %s", e)
+            return None
 
     async def notify_error(self, error: str):
         """Send error notification"""

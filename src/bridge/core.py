@@ -31,10 +31,12 @@ class Bridge:
         # Telegram
         self.tg = TelegramBridge(settings, self.db)
 
-        # Whitelist
+        # Whitelist (None = allow all, empty set after filtering = allow all)
         self.allowed_users: set[str] | None = None
         if settings.allowed_users:
-            self.allowed_users = {u.strip() for u in settings.allowed_users.split(",")}
+            users = {u.strip() for u in settings.allowed_users.split(",") if u.strip()}
+            if users:
+                self.allowed_users = users
 
     async def start(self):
         """Start the bridge"""

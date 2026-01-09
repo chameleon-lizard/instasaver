@@ -1,9 +1,11 @@
+import logging
 import sqlite3
 from pathlib import Path
 from contextlib import contextmanager
 from dataclasses import dataclass
 
 DB_PATH = Path("data/bridge.db")
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -18,7 +20,18 @@ class MessageMapping:
 class Database:
     def __init__(self):
         DB_PATH.parent.mkdir(exist_ok=True)
+        db_existed = DB_PATH.exists()
         self._init_db()
+
+        # Log database status on startup
+        with self._conn() as conn:
+            seen_count = conn.execute("SELECT COUNT(*) FROM seen_messages").fetchone()[0]
+            mapping_count = conn.execute("SELECT COUNT(*) FROM message_mapping").fetchone()[0]
+
+        logger.info(
+            "Database initialized: path=%s, existed=%s, seen_messages=%d, mappings=%d",
+            DB_PATH.resolve(), db_existed, seen_count, mapping_count
+        )
 
     @contextmanager
     def _conn(self):
