@@ -1,0 +1,4 @@
+instagrapi>=2.0.0
+aiogram>=3.0.0
+pydantic-settings>=2.0.0
+httpx>=0.25.0
