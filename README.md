@@ -5,5 +5,7 @@
 ## Запуск
 
 ```
+cp .env.example .env
+vim .env # Тут заполнить все логины и пароли
 docker-compose up -d
 ```
